@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Tracker</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
+        #app { display: flex; height: 100%; }
+        #sidebar { width: 240px; overflow-y: auto; background: #fafafa; border-right: 1px solid #ddd; }
+        #sidebar h2 { margin: 0; padding: 12px; font-size: 14px; color: #555; }
+        #deviceList { list-style: none; margin: 0; padding: 0; }
+        #deviceList li { padding: 10px 12px; cursor: pointer; border-bottom: 1px solid #eee; }
+        #deviceList li:hover { background: #eef2ff; }
+        #deviceList li.active { background: #2563eb; color: #fff; }
+        #map { flex: 1; }
+        .leaflet-tile-pane { filter: grayscale(1) brightness(1.05); }
+    </style>
+</head>
+<body>
+
+    <div id="app">
+    <aside id="sidebar">
+        <h2>Dispositivos</h2>
+        <ul id="deviceList"></ul>
+    </aside>
+    <div id="map"></div>
+    </div>
+
+    <script>
+        const map = L.map("map").setView([-12.05, -77.04], 13);
+        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            attribution: "&copy; OpenStreetMap"
+        }).addTo(map);
+
+        let deviceId = null;
+        let marker = null;
+        let lastSig = null;
+        let firstLoad = true;
+        const trail = L.layerGroup().addTo(map);
+
+        function fmt(ts) {
+            return new Date(ts).toLocaleString("es-PE", { timeZone: "America/Lima" });
+        }
+
+        function drawTrail(data) {
+            trail.clearLayers();
+            const n = data.length;
+            for (let i = 0; i < n; i++) {
+                const p = data[i];
+                const pos = [p.latitude, p.longitude];
+                const op = n > 1 ? 0.1 + 0.9 * (i / (n - 1)) : 1;
+
+                if (i > 0) {
+                const prev = [data[i-1].latitude, data[i-1].longitude];
+                L.polyline([prev, pos],
+                    { color: "#2563eb", weight: 3, opacity: op }).addTo(trail);
+                }
+                L.circleMarker(pos, { radius: 4, color: "#fff", weight: 1,
+                    fillColor: "#2563eb", fillOpacity: op })
+                .bindPopup(fmt(p.timestamp))
+                .addTo(trail);
+            }
+        }
+
+        async function refresh() {
+            if (!deviceId) return;
+            const res = await fetch(`/devices/${encodeURIComponent(deviceId)}/locations?limit=30`);
+            if (!res.ok) { console.error("Error:", res.status); return; }
+            const data = await res.json();
+            if (data.length === 0) return;
+
+            data.reverse();
+            const lastP = data[data.length - 1];
+            if (lastP.id === lastSig) return;   // sin cambios: no redibujar
+            lastSig = lastP.id;     
+            const last = [lastP.latitude, lastP.longitude];
+
+            drawTrail(data);
+            if (marker) {
+                marker.setLatLng(last).setPopupContent(fmt(lastP.timestamp));
+            } else {
+                marker = L.marker(last).bindPopup(fmt(lastP.timestamp)).addTo(map);
+            }
+
+            if (firstLoad) {
+                map.fitBounds(L.latLngBounds(data.map(p => [p.latitude, p.longitude])));
+                firstLoad = false;
+            }
+        }
+
+        function setDevice(id) {
+            document.querySelectorAll("#deviceList li").forEach(
+                li => li.classList.toggle("active", li.textContent === id));
+            id = id.trim();
+            if (!id) return;
+            deviceId = id;
+            trail.clearLayers();
+            if (marker) { map.removeLayer(marker); marker = null; }
+            firstLoad = true;
+            lastSig = null;
+            refresh();
+        }
+
+        async function loadDevices() {
+            const res = await fetch("/devices/ids");
+            if (!res.ok) return;
+            const ids = await res.json();
+            const list = document.getElementById("deviceList");
+            list.innerHTML = "";
+            ids.forEach(id => {
+                const li = document.createElement("li");
+                li.textContent = id;
+                if (id === deviceId) li.classList.add("active");
+                li.onclick = () => setDevice(id);
+                list.appendChild(li);
+            });
+            if (!deviceId && ids.length) setDevice(ids[0]);
+        }
+
+        loadDevices();
+        setInterval(loadDevices, 30000);
+
+        refresh();
+        setInterval(refresh, 5000);
+    </script>
+</body>
+</html>

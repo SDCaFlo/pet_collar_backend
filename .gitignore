@@ -1,0 +1,17 @@
+.env
+docker-compose.yml
+poetry.lock
+.venv
+.vscode
+
+#alembic
+*.pyc
+*.pyo
+
+# Alembic / SQLite locals
+alembic/*.db
+alembic/*.sqlite3
+*.sqlite3
+
+#cache
+__pycache__/
